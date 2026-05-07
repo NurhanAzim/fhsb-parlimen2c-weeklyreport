@@ -1,0 +1,10 @@
+services:
+  weekly-report-bot:
+    build: .
+    container_name: weekly-report-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./runtime:/app/runtime
