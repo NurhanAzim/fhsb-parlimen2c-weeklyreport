@@ -72,14 +72,43 @@ class ReportGeneratorTest(unittest.TestCase):
 
             render_report("template-weekly-report.odt", output, report)
             _styles_text, content_text, content_root = _read_odt_xml(output)
+            tables = content_root.findall(".//table:table", ODT_NS)
             rows = content_root.findall(".//table:table/table:table-row", ODT_NS)
             soft_breaks = content_root.findall(".//table:table/text:soft-page-break", ODT_NS)
 
+            self.assertEqual(len(tables), 3)
             self.assertEqual(len(rows), 3)
-            self.assertEqual(len(soft_breaks), 2)
+            self.assertEqual(len(soft_breaks), 0)
             self.assertIn("KERJA PERTAMA", content_text)
             self.assertIn("KERJA KEDUA", content_text)
             self.assertIn("KERJA KETIGA", content_text)
+
+    def test_six_works_only_last_page_uses_last_page_style(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            output = root / "weekly-six.odt"
+
+            report = ReportData(
+                date_start="26/12/2026",
+                date_end="31/12/2026",
+                location="ARAS 6",
+                issues=[
+                    Issue(description=f"kerja {index}", images_description=f"nota {index}", image_paths=[])
+                    for index in range(1, 7)
+                ],
+            )
+
+            render_report("template-weekly-report.odt", output, report)
+            styles_text, _content_text, content_root = _read_odt_xml(output)
+            tables = content_root.findall(".//table:table", ODT_NS)
+            table_style_attr = f'{{{ODT_NS["table"]}}}style-name'
+            table_style_names = [table.attrib[table_style_attr] for table in tables]
+
+            self.assertEqual(len(tables), 6)
+            self.assertEqual(table_style_names[:-1], ["BUTIRANKERJA.Body"] * 5)
+            self.assertEqual(table_style_names[-1], "BUTIRANKERJA.Last")
+            self.assertIn('style:name="ReportBody"', styles_text)
+            self.assertIn('style:name="ReportLast"', styles_text)
 
     def test_work_image_is_scaled_to_fit_box(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -111,12 +111,8 @@ def render_report(
     content_root = ET.fromstring(package["content.xml"])
     styles_root = ET.fromstring(package["styles.xml"])
     manifest_root = ET.fromstring(package["META-INF/manifest.xml"])
-    page_count = max(1, len(report.issues))
-
-    if page_count == 1:
-        _force_first_page_to_match_standard(styles_root)
     _replace_scalar_placeholders(styles_root, report.placeholder_map())
-    _populate_content(content_root, report)
+    _populate_content(content_root, styles_root, report)
 
     picture_entries = _collect_picture_entries(report.issues or [Issue(description="", images_description="", image_paths=[])])
     _update_manifest(manifest_root, picture_entries)
@@ -143,13 +139,16 @@ def _replace_scalar_placeholders(root: ET.Element, replacements: dict[str, str])
         root.append(child)
 
 
-def _populate_content(root: ET.Element, report: ReportData) -> None:
+def _populate_content(root: ET.Element, styles_root: ET.Element, report: ReportData) -> None:
     _replace_scalar_placeholders(root, report.placeholder_map())
     entries = report.issues or [Issue(description="", images_description="", image_paths=[])]
 
     table = root.find(".//table:table", ODT_NS)
     if table is None:
         raise ValueError("Weekly report table not found in ODT template.")
+    table_parent = _find_parent(root, table)
+    if table_parent is None:
+        raise ValueError("Weekly report table parent not found in ODT template.")
 
     body_rows = list(table.findall("table:table-row", ODT_NS))
     if len(body_rows) < 2:
@@ -157,45 +156,112 @@ def _populate_content(root: ET.Element, report: ReportData) -> None:
 
     first_row_template = deepcopy(body_rows[0])
     last_row_template = deepcopy(body_rows[1])
-    soft_break_template = table.find("text:soft-page-break", ODT_NS)
-    if soft_break_template is None:
-        raise ValueError("Soft page break not found in ODT template.")
-
-    for child in list(table):
-        if child.tag in {
-            _q("table", "table-row"),
-            _q("text", "soft-page-break"),
-        }:
-            table.remove(child)
+    body_table_style_name, last_table_style_name = _ensure_page_styles(root, styles_root, table)
+    insert_at = list(table_parent).index(table)
+    table_parent.remove(table)
 
     for index, entry in enumerate(entries):
         is_last_page = index == len(entries) - 1
+        page_table = deepcopy(table)
+        _clear_table_body(page_table)
+        page_table.attrib[_q("table", "style-name")] = last_table_style_name if is_last_page else body_table_style_name
+
         row = deepcopy(last_row_template if (len(entries) == 1 or is_last_page) else first_row_template)
         _fill_work_row(row, entry, use_second_page_tokens=(len(entries) == 1 or is_last_page))
-        table.append(row)
-        if index < len(entries) - 1:
-            table.append(deepcopy(soft_break_template))
+        page_table.append(row)
+
+        table_parent.insert(insert_at + index, page_table)
 
 
-def _force_first_page_to_match_standard(styles_root: ET.Element) -> None:
-    master_page = styles_root.find(".//style:master-page", ODT_NS)
+def _ensure_page_styles(
+    content_root: ET.Element,
+    styles_root: ET.Element,
+    table: ET.Element,
+) -> tuple[str, str]:
+    content_styles = content_root.find("office:automatic-styles", ODT_NS)
+    if content_styles is None:
+        raise ValueError("ODT automatic styles not found in content.xml.")
+
+    master_styles = styles_root.find("office:master-styles", ODT_NS)
+    if master_styles is None:
+        raise ValueError("ODT master styles not found in styles.xml.")
+
+    base_table_style_name = table.attrib.get(_q("table", "style-name"))
+    if not base_table_style_name:
+        raise ValueError("Weekly report table style missing in ODT template.")
+
+    base_table_style = content_styles.find(f"style:style[@style:name='{base_table_style_name}']", ODT_NS)
+    if base_table_style is None:
+        raise ValueError("Weekly report table style definition not found in ODT template.")
+
+    master_page = master_styles.find("style:master-page", ODT_NS)
     if master_page is None:
-        return
+        raise ValueError("ODT master page not found in styles.xml.")
 
+    body_master_name = "ReportBody"
+    last_master_name = "ReportLast"
+    body_table_style_name = f"{base_table_style_name}.Body"
+    last_table_style_name = f"{base_table_style_name}.Last"
+
+    body_master = _clone_master_page(master_page, body_master_name)
+    _set_master_page_footer_mode(body_master, blank_footer=True)
+    _upsert_named_child(master_styles, body_master, "style", "master-page", body_master_name)
+
+    last_master = _clone_master_page(master_page, last_master_name)
+    _set_master_page_footer_mode(last_master, blank_footer=False)
+    _upsert_named_child(master_styles, last_master, "style", "master-page", last_master_name)
+
+    body_table_style = deepcopy(base_table_style)
+    body_table_style.attrib[_q("style", "name")] = body_table_style_name
+    body_table_style.attrib[_q("style", "master-page-name")] = body_master_name
+    _upsert_named_child(content_styles, body_table_style, "style", "style", body_table_style_name)
+
+    last_table_style = deepcopy(base_table_style)
+    last_table_style.attrib[_q("style", "name")] = last_table_style_name
+    last_table_style.attrib[_q("style", "master-page-name")] = last_master_name
+    _upsert_named_child(content_styles, last_table_style, "style", "style", last_table_style_name)
+
+    return body_table_style_name, last_table_style_name
+
+
+def _clone_master_page(master_page: ET.Element, style_name: str) -> ET.Element:
+    clone = deepcopy(master_page)
+    clone.attrib[_q("style", "name")] = style_name
+    return clone
+
+
+def _set_master_page_footer_mode(master_page: ET.Element, blank_footer: bool) -> None:
     header = master_page.find("style:header", ODT_NS)
     header_first = master_page.find("style:header-first", ODT_NS)
-    footer = master_page.find("style:footer", ODT_NS)
-    footer_first = master_page.find("style:footer-first", ODT_NS)
-
     if header is not None:
         if header_first is None:
             header_first = ET.SubElement(master_page, _q("style", "header-first"))
         _replace_children(header_first, header)
 
-    if footer is not None:
-        if footer_first is None:
-            footer_first = ET.SubElement(master_page, _q("style", "footer-first"))
-        _replace_children(footer_first, footer)
+    footer = master_page.find("style:footer", ODT_NS)
+    footer_first = master_page.find("style:footer-first", ODT_NS)
+    if footer is None and not blank_footer:
+        return
+
+    if footer is None:
+        footer = ET.SubElement(master_page, _q("style", "footer"))
+    if footer_first is None:
+        footer_first = ET.SubElement(master_page, _q("style", "footer-first"))
+
+    if blank_footer:
+        _clear_node_content(footer)
+        _clear_node_content(footer_first)
+        ET.SubElement(footer, _q("text", "p"), {_q("text", "style-name"): "Footer"})
+        ET.SubElement(footer_first, _q("text", "p"), {_q("text", "style-name"): "Footer"})
+        return
+
+    _replace_children(footer_first, footer)
+
+
+def _clear_table_body(table: ET.Element) -> None:
+    for child in list(table):
+        if child.tag in {_q("table", "table-row"), _q("text", "soft-page-break")}:
+            table.remove(child)
 
 
 def _fill_work_row(row: ET.Element, entry: Issue, use_second_page_tokens: bool) -> None:
@@ -353,6 +419,27 @@ def _replace_children(target: ET.Element, source: ET.Element) -> None:
     target.tail = source.tail
     for child in list(source):
         target.append(deepcopy(child))
+
+
+def _find_parent(root: ET.Element, node: ET.Element) -> ET.Element | None:
+    for parent in root.iter():
+        for child in list(parent):
+            if child is node:
+                return parent
+    return None
+
+
+def _upsert_named_child(
+    parent: ET.Element,
+    child: ET.Element,
+    prefix: str,
+    local_name: str,
+    style_name: str,
+) -> None:
+    existing = parent.find(f"{prefix}:{local_name}[@style:name='{style_name}']", ODT_NS)
+    if existing is not None:
+        parent.remove(existing)
+    parent.append(child)
 
 
 def _xml_escape(value: str) -> str:
