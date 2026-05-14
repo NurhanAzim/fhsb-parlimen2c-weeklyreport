@@ -188,11 +188,11 @@ def _page_entries_for_issues(issues: list[Issue]) -> list[Issue]:
             )
             continue
 
-        for image_path in issue.image_paths:
+        for index, image_path in enumerate(issue.image_paths):
             entries.append(
                 Issue(
-                    description=issue.description,
-                    images_description=issue.images_description,
+                    description=issue.description if index == 0 else "",
+                    images_description=issue.images_description if index == 0 else "",
                     image_paths=[image_path],
                 )
             )

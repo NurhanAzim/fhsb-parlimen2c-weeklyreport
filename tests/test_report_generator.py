@@ -133,9 +133,13 @@ class ReportGeneratorTest(unittest.TestCase):
             render_report("template-weekly-report.odt", output, report)
             _styles_text, _content_text, content_root = _read_odt_xml(output)
             tables = content_root.findall(".//table:table", ODT_NS)
+            cell_texts = [_table_body_cell_texts(table) for table in tables]
 
             self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
             self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1, 1])
+            self.assertEqual(cell_texts[0], ["KERJA AWAL", "", "Nota awal"])
+            self.assertEqual(cell_texts[1], ["KERJA AKHIR", "", "Nota akhir"])
+            self.assertEqual(cell_texts[2], ["", "", ""])
 
     def test_previous_issue_multiple_images_stays_body_until_report_last_page(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -156,9 +160,13 @@ class ReportGeneratorTest(unittest.TestCase):
             render_report("template-weekly-report.odt", output, report)
             _styles_text, _content_text, content_root = _read_odt_xml(output)
             tables = content_root.findall(".//table:table", ODT_NS)
+            cell_texts = [_table_body_cell_texts(table) for table in tables]
 
             self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
             self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1, 1])
+            self.assertEqual(cell_texts[0], ["KERJA AWAL", "", "Nota awal"])
+            self.assertEqual(cell_texts[1], ["", "", ""])
+            self.assertEqual(cell_texts[2], ["KERJA AKHIR", "", "Nota akhir"])
 
     def test_single_issue_multiple_images_only_final_image_page_uses_last_page_style(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -178,9 +186,12 @@ class ReportGeneratorTest(unittest.TestCase):
             render_report("template-weekly-report.odt", output, report)
             _styles_text, _content_text, content_root = _read_odt_xml(output)
             tables = content_root.findall(".//table:table", ODT_NS)
+            cell_texts = [_table_body_cell_texts(table) for table in tables]
 
             self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
             self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1])
+            self.assertEqual(cell_texts[0], ["KERJA TUNGGAL", "", "Nota tunggal"])
+            self.assertEqual(cell_texts[1], ["", "", ""])
 
     def test_work_image_is_scaled_to_fit_box(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -221,6 +232,16 @@ def _read_odt_xml(path: Path) -> tuple[str, str, ET.Element]:
 def _table_style_names(tables: list[ET.Element]) -> list[str]:
     table_style_attr = f'{{{ODT_NS["table"]}}}style-name'
     return [table.attrib[table_style_attr] for table in tables]
+
+
+def _table_body_cell_texts(table: ET.Element) -> list[str]:
+    row = table.find("table:table-row", ODT_NS)
+    assert row is not None
+    values: list[str] = []
+    for cell in row.findall("table:table-cell", ODT_NS):
+        text = "".join(cell.itertext()).strip()
+        values.append(text)
+    return values
 
 
 def _master_page_text(styles_root: ET.Element, name: str) -> str:
