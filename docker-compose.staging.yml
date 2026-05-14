@@ -6,5 +6,6 @@ services:
     env_file:
       - .env.staging
     volumes:
+      - ./:/app
       - ./data-staging:/app/data-staging
       - ./runtime-staging:/app/runtime-staging
