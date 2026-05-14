@@ -100,6 +100,7 @@ class ReportGeneratorTest(unittest.TestCase):
 
             render_report("template-weekly-report.odt", output, report)
             styles_text, _content_text, content_root = _read_odt_xml(output)
+            styles_root = ET.fromstring(styles_text)
             tables = content_root.findall(".//table:table", ODT_NS)
             table_style_attr = f'{{{ODT_NS["table"]}}}style-name'
             table_style_names = [table.attrib[table_style_attr] for table in tables]
@@ -109,6 +110,9 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertEqual(table_style_names[-1], "BUTIRANKERJA.Last")
             self.assertIn('style:name="ReportBody"', styles_text)
             self.assertIn('style:name="ReportLast"', styles_text)
+            self.assertNotIn("Disediakan Oleh", _master_page_text(styles_root, "Standard"))
+            self.assertNotIn("Disediakan Oleh", _master_page_text(styles_root, "ReportBody"))
+            self.assertIn("Disediakan Oleh", _master_page_text(styles_root, "ReportLast"))
 
     def test_last_issue_multiple_images_only_final_image_page_uses_last_page_style(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -217,6 +221,12 @@ def _read_odt_xml(path: Path) -> tuple[str, str, ET.Element]:
 def _table_style_names(tables: list[ET.Element]) -> list[str]:
     table_style_attr = f'{{{ODT_NS["table"]}}}style-name'
     return [table.attrib[table_style_attr] for table in tables]
+
+
+def _master_page_text(styles_root: ET.Element, name: str) -> str:
+    master_page = styles_root.find(f".//style:master-page[@style:name='{name}']", ODT_NS)
+    assert master_page is not None
+    return "".join(master_page.itertext())
 
 
 def _write_test_images(root: Path, count: int) -> list[Path]:

@@ -236,6 +236,7 @@ def _ensure_page_styles(
     last_master = _clone_master_page(master_page, last_master_name)
     _set_master_page_footer_mode(last_master, blank_footer=False)
     _upsert_named_child(master_styles, last_master, "style", "master-page", last_master_name)
+    _set_master_page_footer_mode(master_page, blank_footer=True)
 
     body_table_style = deepcopy(base_table_style)
     body_table_style.attrib[_q("style", "name")] = body_table_style_name
