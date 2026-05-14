@@ -110,6 +110,74 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertIn('style:name="ReportBody"', styles_text)
             self.assertIn('style:name="ReportLast"', styles_text)
 
+    def test_last_issue_multiple_images_only_final_image_page_uses_last_page_style(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            images = _write_test_images(root, count=3)
+            output = root / "weekly-last-multi-image.odt"
+
+            report = ReportData(
+                date_start="26/12/2026",
+                date_end="31/12/2026",
+                location="ARAS 6",
+                issues=[
+                    Issue(description="kerja awal", images_description="nota awal", image_paths=[images[0]]),
+                    Issue(description="kerja akhir", images_description="nota akhir", image_paths=images[1:]),
+                ],
+            )
+
+            render_report("template-weekly-report.odt", output, report)
+            _styles_text, _content_text, content_root = _read_odt_xml(output)
+            tables = content_root.findall(".//table:table", ODT_NS)
+
+            self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
+            self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1, 1])
+
+    def test_previous_issue_multiple_images_stays_body_until_report_last_page(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            images = _write_test_images(root, count=3)
+            output = root / "weekly-previous-multi-image.odt"
+
+            report = ReportData(
+                date_start="26/12/2026",
+                date_end="31/12/2026",
+                location="ARAS 6",
+                issues=[
+                    Issue(description="kerja awal", images_description="nota awal", image_paths=images[:2]),
+                    Issue(description="kerja akhir", images_description="nota akhir", image_paths=[images[2]]),
+                ],
+            )
+
+            render_report("template-weekly-report.odt", output, report)
+            _styles_text, _content_text, content_root = _read_odt_xml(output)
+            tables = content_root.findall(".//table:table", ODT_NS)
+
+            self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
+            self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1, 1])
+
+    def test_single_issue_multiple_images_only_final_image_page_uses_last_page_style(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            images = _write_test_images(root, count=2)
+            output = root / "weekly-single-multi-image.odt"
+
+            report = ReportData(
+                date_start="26/12/2026",
+                date_end="31/12/2026",
+                location="ARAS 6",
+                issues=[
+                    Issue(description="kerja tunggal", images_description="nota tunggal", image_paths=images),
+                ],
+            )
+
+            render_report("template-weekly-report.odt", output, report)
+            _styles_text, _content_text, content_root = _read_odt_xml(output)
+            tables = content_root.findall(".//table:table", ODT_NS)
+
+            self.assertEqual(_table_style_names(tables), ["BUTIRANKERJA.Body", "BUTIRANKERJA.Last"])
+            self.assertEqual([len(table.findall(".//draw:frame", ODT_NS)) for table in tables], [1, 1])
+
     def test_work_image_is_scaled_to_fit_box(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -144,6 +212,20 @@ def _read_odt_xml(path: Path) -> tuple[str, str, ET.Element]:
         styles_text = archive.read("styles.xml").decode("utf-8")
         content_text = archive.read("content.xml").decode("utf-8")
     return styles_text, content_text, ET.fromstring(content_text)
+
+
+def _table_style_names(tables: list[ET.Element]) -> list[str]:
+    table_style_attr = f'{{{ODT_NS["table"]}}}style-name'
+    return [table.attrib[table_style_attr] for table in tables]
+
+
+def _write_test_images(root: Path, count: int) -> list[Path]:
+    images: list[Path] = []
+    for index in range(1, count + 1):
+        image_path = root / f"work-{index}.png"
+        _write_png(image_path, width=1200, height=900)
+        images.append(image_path)
+    return images
 
 
 def _write_png(path: Path, width: int, height: int) -> None:

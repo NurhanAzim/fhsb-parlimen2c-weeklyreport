@@ -141,7 +141,9 @@ def _replace_scalar_placeholders(root: ET.Element, replacements: dict[str, str])
 
 def _populate_content(root: ET.Element, styles_root: ET.Element, report: ReportData) -> None:
     _replace_scalar_placeholders(root, report.placeholder_map())
-    entries = report.issues or [Issue(description="", images_description="", image_paths=[])]
+    entries = _page_entries_for_issues(
+        report.issues or [Issue(description="", images_description="", image_paths=[])]
+    )
 
     table = root.find(".//table:table", ODT_NS)
     if table is None:
@@ -171,6 +173,30 @@ def _populate_content(root: ET.Element, styles_root: ET.Element, report: ReportD
         page_table.append(row)
 
         table_parent.insert(insert_at + index, page_table)
+
+
+def _page_entries_for_issues(issues: list[Issue]) -> list[Issue]:
+    entries: list[Issue] = []
+    for issue in issues:
+        if not issue.image_paths:
+            entries.append(
+                Issue(
+                    description=issue.description,
+                    images_description=issue.images_description,
+                    image_paths=[],
+                )
+            )
+            continue
+
+        for image_path in issue.image_paths:
+            entries.append(
+                Issue(
+                    description=issue.description,
+                    images_description=issue.images_description,
+                    image_paths=[image_path],
+                )
+            )
+    return entries
 
 
 def _ensure_page_styles(
